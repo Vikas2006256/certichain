@@ -1,0 +1,159 @@
+// CertiChain Database Schema (Prisma)
+// Supports SQLite for instant local dev & PostgreSQL for production
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String      @id @default(uuid())
+  email         String      @unique
+  passwordHash  String
+  name          String
+  role          String      @default("STUDENT") // SUPER_ADMIN, UNIVERSITY_ADMIN, STUDENT
+  walletAddress String?     
+  universityId  String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  university    University? @relation(fields: [universityId], references: [id])
+  student       Student?
+  auditLogs     AuditLog[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model University {
+  id            String        @id @default(uuid())
+  name          String
+  code          String        @unique // e.g. "MIT", "STAN", "OXF"
+  contactEmail  String
+  address       String?
+  website       String?
+  walletAddress String        @unique // On-chain authorized issuer address
+  status        String        @default("APPROVED") // PENDING, APPROVED, SUSPENDED
+  description   String?
+  logoUrl       String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  users         User[]
+  students      Student[]
+  certificates  Certificate[]
+
+  @@index([code])
+  @@index([walletAddress])
+  @@index([status])
+}
+
+model Student {
+  id              String        @id @default(uuid())
+  userId          String        @unique
+  studentIdNumber String        // Institutional student ID (e.g., "STU-2024-001")
+  universityId    String
+  department      String
+  program         String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  university      University    @relation(fields: [universityId], references: [id])
+  certificates    Certificate[]
+
+  @@unique([universityId, studentIdNumber])
+  @@index([studentIdNumber])
+}
+
+model Certificate {
+  id                String            @id // e.g. "CERT-2026-XXXXX" or UUID
+  certHash          String            @unique // 0x prefixed SHA-256 fingerprint
+  title             String            // e.g. "Bachelor of Science in Computer Science"
+  recipientName     String            // Student full name
+  studentIdNumber   String            // Institutional student ID
+  studentEmail      String            // Student email
+  universityId      String
+  studentRefId      String?
+  issueDate         DateTime          @default(now())
+  grade             String?           // e.g. "First Class Honours", "GPA 3.95"
+  description       String?           // Certificate description or honors
+  department        String?
+  documentUrl       String?           // Canonical document storage path / IPFS URI
+  documentFilename  String?
+  txHash            String?           // Blockchain transaction hash
+  blockNumber       Int?              // Blockchain block number
+  status            String            @default("ISSUED") // ISSUED, REVOKED
+  revocationReason  String?
+  revokedAt         DateTime?
+  isPublicViewable  Boolean           @default(true)
+  qrCodeDataUrl     String?           // Embedded QR Code data URL
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  university        University        @relation(fields: [universityId], references: [id])
+  student           Student?          @relation(fields: [studentRefId], references: [id])
+  verificationLogs  VerificationLog[]
+  transactions      BlockchainTransaction[]
+
+  @@index([certHash])
+  @@index([status])
+  @@index([universityId])
+  @@index([studentEmail])
+}
+
+model VerificationLog {
+  id               String       @id @default(uuid())
+  certificateId    String
+  verifiedByIp     String?
+  userAgent        String?
+  method           String       @default("SEARCH") // SEARCH, QR_SCAN, FILE_UPLOAD
+  isValid          Boolean
+  resultStatus     String       // VERIFIED, REVOKED, HASH_MISMATCH, NOT_FOUND
+  verificationHash String?
+  createdAt        DateTime     @default(now())
+
+  certificate      Certificate  @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+
+  @@index([certificateId])
+  @@index([createdAt])
+}
+
+model BlockchainTransaction {
+  id            String       @id @default(uuid())
+  txHash        String       @unique
+  blockNumber   Int?
+  fromAddress   String
+  toAddress     String
+  functionName  String       // issueCertificate, revokeCertificate, registerUniversity, etc.
+  status        String       @default("CONFIRMED") // PENDING, CONFIRMED, FAILED
+  gasUsed       String?
+  certificateId String?
+  details       String?
+  createdAt     DateTime     @default(now())
+
+  certificate   Certificate? @relation(fields: [certificateId], references: [id])
+
+  @@index([txHash])
+  @@index([certificateId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String   // USER_LOGIN, CERTIFICATE_ISSUED, CERTIFICATE_REVOKED, etc.
+  resource  String   // Certificate, University, User
+  details   String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
